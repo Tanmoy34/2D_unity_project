@@ -12,11 +12,21 @@ public class PlatformGenerator : MonoBehaviour
     [SerializeField] private float platformHeight = 0.5f;
     [SerializeField] private Vector2 yRandomRange = new Vector2(-1f, 2f);
 
+    [Header("Coins")]
+    [SerializeField] private GameObject coinPrefab;
+    [SerializeField, Range(0f, 1f)] private float coinSpawnChance = 0.7f;
+    [SerializeField] private float coinHorizontalMargin = 0.3f;
+    [SerializeField] private float coinVerticalOffset = 0.6f;
+
     [SerializeField] private GameObject winPanel;
     [SerializeField] private bool pauseOnWin = true;
     [SerializeField] private float winShowDelay = 0.5f;
 
     private bool hasWon = false;
+
+    // Coin tracking
+    private int totalCoins = 0;
+    private int collectedCoins = 0;
 
     private void Start()
     {
@@ -43,6 +53,68 @@ public class PlatformGenerator : MonoBehaviour
         platform.transform.localScale = new Vector3(width, height, 1);
         platform.name = $"Platform ({x:F1}, {y:F1})";
 
+        // Spawn coin only on non-last platforms according to chance
+        if (!isLast && coinPrefab != null && Random.value <= coinSpawnChance)
+        {
+            // Determine platform world bounds using collider if present, otherwise fallback to transform & scale
+            Collider2D platCol = platform.GetComponent<Collider2D>() ?? platform.GetComponentInChildren<Collider2D>();
+            float platLeftWorld, platRightWorld, platTopWorld;
+
+            if (platCol != null)
+            {
+                Bounds pBounds = platCol.bounds;
+                platLeftWorld = pBounds.min.x;
+                platRightWorld = pBounds.max.x;
+                platTopWorld = pBounds.max.y;
+            }
+            else
+            {
+                float halfWidth = Mathf.Abs(width) * 0.5f;
+                platLeftWorld = platform.transform.position.x - halfWidth;
+                platRightWorld = platform.transform.position.x + halfWidth;
+                platTopWorld = platform.transform.position.y + (height * 0.5f);
+            }
+
+            // Ensure margins do not invert range
+            float minX = platLeftWorld + coinHorizontalMargin;
+            float maxX = platRightWorld - coinHorizontalMargin;
+            if (maxX <= minX)
+            {
+                // fallback to center if platform too narrow for margin
+                minX = (platLeftWorld + platRightWorld) * 0.5f;
+                maxX = minX;
+            }
+
+            float spawnX = Random.Range(minX, maxX);
+            float spawnY = platTopWorld + coinVerticalOffset;
+
+            // Instantiate coin in world space, preserve its world scale, then parent and compensate for platform scale
+            GameObject coin = Instantiate(coinPrefab, new Vector3(spawnX, spawnY, 0f), Quaternion.identity);
+            Vector3 origWorldScale = coin.transform.lossyScale;
+
+            // Make sure collider is trigger if present
+            Collider2D coinCol = coin.GetComponent<Collider2D>() ?? coin.GetComponentInChildren<Collider2D>();
+            if (coinCol != null) coinCol.isTrigger = true;
+
+            // Parent to platform but keep world position. Then adjust localScale so world scale equals original.
+            coin.transform.SetParent(platform.transform, true);
+            Vector3 pLossy = platform.transform.lossyScale;
+            coin.transform.localScale = new Vector3(
+                pLossy.x != 0f ? origWorldScale.x / pLossy.x : origWorldScale.x,
+                pLossy.y != 0f ? origWorldScale.y / pLossy.y : origWorldScale.y,
+                pLossy.z != 0f ? origWorldScale.z / pLossy.z : origWorldScale.z
+            );
+
+            // Ensure coin has Coin component and wire up the generator
+            Coin c = coin.GetComponent<Coin>();
+            if (c != null)
+            {
+                c.generator = this;
+            }
+
+            totalCoins++;
+        }
+
         if (isLast)
         {
             GameObject triggerObj = new GameObject("WinTrigger");
@@ -60,6 +132,16 @@ public class PlatformGenerator : MonoBehaviour
             wt.generator = this;
         }
     }
+
+    // Called by Coin when collected
+    public void RegisterCoinCollected()
+    {
+        collectedCoins = Mathf.Min(totalCoins, collectedCoins + 1);
+    }
+
+    // Properties for WinTrigger checks
+    public int TotalCoins => totalCoins;
+    public int CollectedCoins => collectedCoins;
 
     public void ShowWin()
     {
@@ -160,8 +242,46 @@ public class WinTrigger : MonoBehaviour
 
         if (playerCenterX < platformLeftX - horizontalTolerance || playerCenterX > platformRightX + horizontalTolerance) return;
 
+        // Require all coins collected before allowing win
+        if (generator.TotalCoins > 0 && generator.CollectedCoins < generator.TotalCoins)
+        {
+            // Not all coins collected yet — do not trigger win.
+            return;
+        }
+
         generator.ShowWin();
         Collider2D myCol = GetComponent<Collider2D>();
         if (myCol != null) myCol.enabled = false;
+    }
+} // end of WinTrigger class
+
+// Simple menu helper: attach this to a GameObject in your Menu scene (e.g. an empty "UIManager").
+// Configure gameSceneName to the name of your gameplay Scene (the scene that should open when Play is pressed).
+public class MenuController : MonoBehaviour
+{
+    [SerializeField] private string gameSceneName = "GameScene"; // set this in Inspector to your gameplay scene name
+
+    // Hook this method to your Play Button's OnClick() in the Menu scene.
+    public void Play()
+    {
+        // Ensure timeScale is normal when entering gameplay
+        Time.timeScale = 1f;
+        if (!string.IsNullOrEmpty(gameSceneName))
+        {
+            SceneManager.LoadScene(gameSceneName);
+        }
+        else
+        {
+            Debug.LogWarning("MenuController.Play called but gameSceneName is empty.");
+        }
+    }
+
+    // Optional: hook to a Quit button
+    public void Quit()
+    {
+        Application.Quit();
+#if UNITY_EDITOR
+        UnityEditor.EditorApplication.isPlaying = false;
+#endif
     }
 }

@@ -1707,6 +1707,10 @@ MonoBehaviour:
   platformWidth: 3
   platformHeight: 0.5
   yRandomRange: {x: -1, y: 2}
+  coinPrefab: {fileID: 1068678261683961212, guid: 56c3485e6382017479e1a4212029b2ff, type: 3}
+  coinSpawnChance: 0.7
+  coinHorizontalMargin: 0.3
+  coinVerticalOffset: 0.6
   winPanel: {fileID: 1321940397}
   pauseOnWin: 1
   winShowDelay: 0.2
